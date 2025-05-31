@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Báo cáo thiết bị - Đầy đủ tính năng</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <style>
+    body {
+      font-family: Arial;
+      max-width: 700px;
+      margin: 30px auto;
+      background: #f9f9f9;
+      padding: 20px;
+      border-radius: 8px;
+    }
+    label { font-weight: bold; margin-top: 15px; display: block; }
+    input, textarea {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    img.preview {
+      max-width: 100%;
+      margin-top: 10px;
+      border-radius: 4px;
+    }
+    #previewList img {
+      margin-bottom: 10px;
+      max-width: 100%;
+    }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .submit-btn { background-color: #28a745; color: white; }
+    .mic-button { width: 50px; margin-left: 6px; }
+  </style>
+</head>
+<body>
+
+<h2>Báo cáo kiểm tra thiết bị (Có OCR + Giọng nói + Nhiều ảnh)</h2>
+
+<label>Tag name:</label>
+<div style="display:flex; gap:10px;">
+  <input type="text" id="tagName" placeholder="Tên thiết bị" />
+  <button class="mic-button" onclick="startSpeech('tagName')">🎤</button>
+</div>
+
+<label>Ảnh để OCR tên thiết bị:</label>
+<input type="file" id="ocrInput" accept="image/*" />
+<img id="ocrPreview" style="display:none;" />
+<p id="ocrResult"></p>
+
+<label>Ghi chú:</label>
+<div style="display:flex; gap:10px;">
+  <textarea id="observation" rows="3"></textarea>
+  <button class="mic-button" onclick="startSpeech('observation')">🎤</button>
+</div>
+
+<label>Email:</label>
+<div style="display:flex; gap:10px;">
+  <input type="email" id="email" placeholder="abc@bsr.com.vn" />
+  <button class="mic-button" onclick="startSpeech('email')">🎤</button>
+</div>
+
+<label>Chọn nhiều ảnh:</label>
+<input type="file" id="statusImages" accept="image/*" multiple />
+<div id="previewList"></div>
+
+<button class="submit-btn" onclick="submitReport()">📤 Gửi báo cáo</button>
+
+<script>
+let imageList = [];
+
+function startSpeech(fieldId) {
+  const field = document.getElementById(fieldId);
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("Trình duyệt không hỗ trợ nhận giọng nói.");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "vi-VN";
+  recognition.start();
+
+  recognition.onresult = function(event) {
+    const transcript = event.results[0][0].transcript;
+    if (field.tagName === "TEXTAREA") {
+      field.value += (field.value ? " " : "") + transcript;
+    } else {
+      field.value = transcript;
+    }
+  };
+}
+
+document.getElementById("ocrInput").addEventListener("change", () => {
+  const file = ocrInput.files[0];
+  if (!file) return;
+
+  const url = URL.createObjectURL(file);
+  const preview = document.getElementById("ocrPreview");
+  const resultText = document.getElementById("ocrResult");
+
+  preview.src = url;
+  preview.style.display = "block";
+  resultText.textContent = "⏳ Đang nhận dạng...";
+
+  Tesseract.recognize(url, "eng", { logger: m => console.log(m) })
+    .then(({ data: { text } }) => {
+      document.getElementById("tagName").value = text.trim();
+      resultText.textContent = "✅ Nhận dạng xong!";
+    })
+    .catch(err => {
+      console.error(err);
+      resultText.textContent = "❌ Lỗi OCR: " + err.message;
+    });
+});
+
+document.getElementById("statusImages").addEventListener("change", () => {
+  const files = statusImages.files;
+  const container = document.getElementById("previewList");
+  container.innerHTML = "";
+  imageList = [];
+
+  for (let file of files) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      const base64 = reader.result.split(',')[1];
+      imageList.push({
+        ImageName: file.name,
+        ImageBase64: base64
+      });
+
+      const img = document.createElement("img");
+      img.src = reader.result;
+      img.className = "preview";
+      container.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+async function submitReport() {
+  const tagName = document.getElementById("tagName").value;
+  const observation = document.getElementById("observation").value;
+  const email = document.getElementById("email").value;
+
+  if (!tagName || !observation || !email || imageList.length === 0) {
+    alert("Vui lòng nhập đầy đủ thông tin và chọn ít nhất 1 ảnh.");
+    return;
+  }
+
+  const payload = {
+    TagName: tagName,
+    Observation: observation,
+    Email: email,
+    Images: imageList
+  };
+
+  const response = await fetch("https://prod-05.southeastasia.logic.azure.com:443/workflows/e0ebd760e38d46e2937ee6974c849f8c/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=EdlYt-_r8W88rKv20ovlkoLsyMiNMacP0s53eQMjfCs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (response.ok) {
+    alert("✅ Gửi thành công!");
+  } else {
+    alert("❌ Gửi thất bại!");
+  }
+}
+</script>
+
+</body>
+</html>
